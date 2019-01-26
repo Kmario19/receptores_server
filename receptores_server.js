@@ -39,7 +39,8 @@ var counters = {
 	trams: {
 		per_hour: {total: 0, history: []},
 		per_minute: {total: 0, history: []},
-		per_second: {total: 0, history: []}
+		per_second: {total: 0, history: []},
+		errors: {total: 0}
 	},
 	trackers: {
 		per_hour: {connected: 0, disconnected: 0, history: []},
@@ -69,12 +70,12 @@ Mongo.connectToMongo(function () {
 				if (counters.trams.per_minute.history.length > data_counter_limit) {
 					counters.trams.per_minute.history.shift();
 				}
-				counters.trams.per_minute.history.push({name: (new Date).toLocaleString(), connected: counters.trackers.connected, disconnected: counters.trackers.disconnected});
+				counters.trams.per_minute.history.push({name: (new Date).toLocaleString(), value: [(new Date).toISOString(), counters.trams.per_minute.total]});
 				counters.trams.per_minute.total = 0;
 				last_minute = 0;
 				counters.trackers.per_hour.connected = trackers.filter(t => t.online).length;
 				counters.trackers.per_hour.disconnected = trackers.filter(t => !t.online).length;
-				counters.trackers.per_hour.history.push({name: (new Date).toLocaleString(), value: [(new Date).toISOString(), counters.trams.per_minute.total]});
+				counters.trackers.per_hour.history.push({name: (new Date).toLocaleString(), connected: counters.trackers.per_hour.connected, disconnected: counters.trackers.per_hour.disconnected});
 				if (counters.date != (new Date).toLocaleDateString().replace(/-(\d)(?!\d)/g, '-0$1')) {
 					updateMongo();
 					counters = {
@@ -82,7 +83,8 @@ Mongo.connectToMongo(function () {
 						trams: {
 							per_hour: {total: 0, history: []},
 							per_minute: {total: 0, history: []},
-							per_second: {total: 0, history: []}
+							per_second: {total: 0, history: []},
+							errors: {total: 0}
 						},
 						trackers: {
 							per_hour: {connected: 0, disconnected: 0, history: []},
@@ -153,7 +155,7 @@ io.on('connection', function(socket) {
 		counters.trams.per_minute.total++;
 		counters.trams.per_second.total++;
 		if (data.error) {
-			counters.total_error++;
+			counters.trams.errors.total++;
 		}
 	});
 
