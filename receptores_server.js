@@ -134,23 +134,25 @@ io.on('connection', function(socket) {
 			var track = trackers.find(obj => {
 				return obj.ip == data.ip && obj.puerto == data.puerto
 			});
-			data.imei = track.imei;
+			if (track) data.IMEI = track.imei;
 		}
 		data.socket = socket.id;
-		if (track) {
-			track.tramas.unshift(data); // Add start
-			if (track.tramas.length >= history_limit) {
-				track.tramas.pop(); // Remove end
+		if (data.IMEI) {
+			if (track) {
+				track.tramas.unshift(data); // Add start
+				if (track.tramas.length >= history_limit) {
+					track.tramas.pop(); // Remove end
+				}
+				track.socket = socket.id;
+				track.online = true;
+				track.ip = data.ip;
+				track.puerto = data.puerto;
+			} else {
+				trackers.push({imei: data.IMEI, ip: data.ip, puerto: data.puerto, socket: socket.id, online: true, tramas: [data]});
 			}
-			track.socket = socket.id;
-			track.online = true;
-			track.ip = data.ip;
-			track.puerto = data.puerto;
-		} else {
-			trackers.push({imei: data.IMEI, ip: data.ip, puerto: data.puerto, socket: socket.id, online: true, tramas: [data]});
+			//io.emit('trama', data);
+			emit_clients('trama', data);
 		}
-		//io.emit('trama', data);
-		emit_clients('trama', data);
 		counters.trams.per_hour.total++;
 		counters.trams.per_minute.total++;
 		counters.trams.per_second.total++;
