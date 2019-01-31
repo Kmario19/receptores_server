@@ -161,6 +161,19 @@ io.on('connection', function(socket) {
 		}
 	});
 
+	socket.on('extra_data', function (data) {
+		var track = trackers.find(obj => {
+			return obj.imei == data.imei
+		});
+		if (track && (track.placa != data.placa || track.numero != data.numero || track.cliente != data.cliente)) {
+			track.placa = data.placa;
+			track.cliente = data.cliente;
+			track.numero = data.numero;
+			data.error = true; // Para emitir solo al front
+			emit_clients('extra_data', data);
+		}
+	});
+
 	socket.on('track_disconnect', function (data) {
 		let track = trackers.find(obj => {
 			return obj.ip == data.ip && obj.puerto == data.puerto
