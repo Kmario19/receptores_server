@@ -1,6 +1,6 @@
 {
   "name": "receptores_server",
-  "version": "1.0.0",
+  "version": "1.2",
   "description": "Receptores GPS Servidor TCP/IP",
   "main": "receptores_server.js",
   "directories": {
@@ -29,6 +29,9 @@
     "express": "^4.15.2",
     "mongodb": "^3.1.13",
     "npm": "^6.4.1",
-    "socket.io": "^2.1.1"
+    "socket.io": "^2.1.1",
+    "pg": "^7.8.0",
+    "request": "^2.88.0",
+    "ws": "^6.1.3"
   }
 }

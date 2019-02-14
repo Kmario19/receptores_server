@@ -19,17 +19,183 @@ const { Mongo } = require('./lib/mongo.js');
 server.listen(config.SOCKET_PORT, function() {
   console.log('server up and running at %s port', config.SOCKET_PORT);
 });
-/*
 
-const express = require('express');
+var request = require('request');
+var WebSocket = require('ws');
+var Pool = require('pg').Pool;
 
-const app = express();
+var url = config.TRACCAR_SERVER;
+var user = {'email': config.TRACCAR_USER, 'password': config.TRACCAR_PASS};
+var cookie = null;
 
-const server = app.listen(3006, function() {
-    console.log('server running on port 3006');
+var devices = [];
+var first_time = true;
+
+var pool = new Pool({
+    user        : config.DB_USER,
+    database    : config.DB_NAME,
+    password    : config.DB_PASS,
+    host        : config.DB_SERVER,
+    port        : 5432,
+    max         : 1,
+    idleTimeoutMillis : 30000
 });
 
-const io = require('socket.io')(server);*/
+function init() {
+    request.post(url + '/api/session', { form: user }, function (error, response, body) {
+        if (!error && response.statusCode == 200) {
+            cookie = response.headers['set-cookie'];
+            /*request({
+                url: url + '/api/devices',
+                headers: {
+                    'Cookie': cookie
+                }
+            }, function (error, response, body) {
+                if (!error && response.statusCode == 200) {*/
+            var ws = new WebSocket('ws' + url.substring(4) + '/api/socket',[],{'headers': {'Cookie': cookie}});
+            
+            ws.on('open', function open() {
+                console.log('Connected SOCKET!');
+            });
+             
+            ws.on('message', function incoming(data) {
+                try {
+                    data = JSON.parse(data);
+                } catch(e) {
+                    console.log('ERROR JSON:', e);
+                }
+                if (data.devices) {
+                    for (var i = 0; i < data.devices.length; i++) {
+                        devices[data.devices[i].id] = data.devices[i];
+                    }
+                } else if (data.positions && !first_time) {
+                    for (i = 0; i < data.positions.length; i++) {
+                        console.log(data.positions[i]);
+                        var track = devices[data.positions[i].deviceId];//devices.find(d => d.id == data.positions.deviceId);
+                        if (track) {
+                        	var trama = build_trama(track, data.positions[i]);
+                        	emit_clients('trama', trama);
+                            send_db(trama);
+                        } else {
+                            console.log('Not Track');
+                        }
+                    }
+                } else if (data.positions && first_time) {
+                    console.log('First Time, ignore positions');
+                    first_time = false;
+                } else {
+                    console.log(data);
+                }
+                
+            });
+
+            ws.on('close', function close() {
+                console.log('Disconnected SOCKET!');
+                reintent_init();
+            });
+        } else {
+            reintent_init();
+        }
+    });
+}
+
+function reintent_init(timeout) {
+    if (!timeout) timeout = 5000;
+    console.log('Reintentando en %i segundos...', timeout / 1000)
+    setTimeout(init, timeout);
+}
+
+function send_db(trama, done) {
+    pool.connect((err, pgClient) => {
+        if (err) return console.error('Error PG connect: ', err);
+        pgClient.query('SELECT funseguimientosatelital2($1) as response', [JSON.stringify(trama)], (err, res) => {
+            if (err) {
+                trama.error = err;
+                pgClient.release();
+                return console.error('Error PG select: ', err);
+            }
+            console.log('%s - %s', trama.IMEI, res.rows[0].response);
+            if (typeof done == 'function')
+                done(res.rows[0].response);
+            pgClient.release();
+        });
+    });
+}
+
+function build_trama(track, position) {
+    var respuesta = 0, ignition = '0', events = '8';
+    if (position.protocol == 'meiligao') {
+        position.attributes.ignition = position.attributes.in4 || position.attributes.in5;
+    }
+    if (position.protocol == 'gps103') {
+		if (position.attributes.event == 'kt' || position.attributes.event == 'jt') {
+			respuesta = 1;
+			console.log('TRAMA RESPUESTA!');
+		}			
+    }
+	if (position.protocol == 'h02' && position.attributes.result) {
+        respuesta = 1;
+        console.log('TRAMA RESPUESTA!');
+    }
+	if (position.attributes.ignition) {
+		ignition = '1';
+	}
+	events += ',' + ignition;
+	if (position.attributes.event == 'sos' || position.attributes.alarm == 'sos') {
+		events += ',10';
+	}
+	if (position.attributes.event == 'powerCut' || position.attributes.alarm == 'powerCut') {
+		events += ',999950';
+	}
+    var trama = {
+        trama : '',
+
+        receptor : 'traccar',
+        ip : '',
+        puerto : '',
+        modelo : position.protocol,
+        error : '',
+
+        ES_TRAMA_POSICION : 1,
+        ES_TRAMA_EVENTO : 0,
+        ES_TRAMA_LOGIN : 0,
+        ES_TRAMA_RESPUESTA : respuesta,
+
+        IGNICION :  ignition,
+        LONGITUD : '',
+        IMEI : track.uniqueId,
+        EVENTO : '',
+        EVENTOS : events,
+        COD_EVENTO : '',
+        HORA : '',
+        SENAL : position.valid === false ? 'V' : 'A',
+        LAT : position.latitude,
+        LNG : position.longitude,
+        CARD_LAT : '',
+        CARD_LNG : '',
+        VELOCIDAD : parseFloat(position.speed * 1.852).toFixed(2),
+        ORIENTACION : position.course,
+        FECHA : '',
+        HDOP : '',
+        ALTITUD : '',
+        IN_OUTS : '',
+        AD1 : '',
+        AD2 : '',
+        AD3 : '',
+        AD4 : '',
+        AD5 : '',
+        ODOMETRO : parseFloat(position.attributes.odometer || position.attributes.totalDistance) / 1000,
+        ODOMETRO_VIRTUAL : '',
+        RFID : '',
+        BAT_INTERNA : '',
+        BAT_EXTERNA : '',
+        NUM_SATELITES : '',
+        DATETIME : (new Date(position.deviceTime)).toLocaleString().replace(/-(\d)(?!\d)/g, '-0$1'), //(new Date(position.deviceTime)).toISOString().replace('T', ' ').substr(0, 19),
+        DATETIME_SYS : (new Date(position.serverTime)).toLocaleString().replace(/-(\d)(?!\d)/g, '-0$1')
+    }
+    //console.log(trama);
+    return trama;
+}
 
 const history_limit = 7, data_counter_limit = 50;
 var connections = [], trackers = [];
@@ -234,7 +400,7 @@ function emit_clients(name, data) {
 		for (var admin in admins) {
 			admins[admin].emit(name, data);
 		}
-		var imei = data.imei || data;
+		var imei = data.imei || data.IMEI || data;
 		for (var client in clients.filter(c => c.imeis.indexOf(imei) != -1)) {
 			clients[client].emit(name, data);
 		}
@@ -243,7 +409,7 @@ function emit_clients(name, data) {
 
 function updateMongo() {
 	console.time('update_mongo');
-	var collection = Mongo.db.collection('trackers');
+	/*var collection = Mongo.db.collection('trackers');
 	for (let i = 0; i < trackers.length; i++) {
 		const track = trackers[i];
 		collection.update(
@@ -251,8 +417,8 @@ function updateMongo() {
 			track,
 			{ upsert: true }
 		);
-	}
-	collection = Mongo.db.collection('counters');
+	}*/
+	var collection = Mongo.db.collection('counters');
 	collection.update(
 		{ date: counters.date },
 		counters,
@@ -260,6 +426,5 @@ function updateMongo() {
 	);
 	console.timeEnd('update_mongo');
 }
-/*let result = jsObjects.find(obj => {
-  return obj.b === 6
-})*/
+
+init();
